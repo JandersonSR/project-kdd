@@ -1,0 +1,8 @@
+streamlit
+
+matplotlib
+numpy
+
+pandas
+seaborn
+# textwrap
