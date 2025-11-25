@@ -3,8 +3,22 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-# import textwrap
+
+import io
 from io import StringIO
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.cluster import KMeans
+
+import arff
+from arff import dump as arff_dump
+
+from sklearn.metrics import silhouette_score, silhouette_samples
+from sklearn.metrics import davies_bouldin_score
+from sklearn.metrics import calinski_harabasz_score
+from sklearn.decomposition import PCA
+
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
 
 # ====================================================
 # CONFIGURAÇÃO INICIAL
@@ -19,8 +33,10 @@ menu = st.sidebar.radio(
     "Selecione uma opção:",
     [
         "Gerar Histogramas", 
-        "Análise Estatística (placeholder)",
-        "Modelos (placeholder)"
+        "Clusterização (K-Means)",
+        "Avaliação dos Clusters",
+        "Resumo Comparativo",
+        "Resumo Comparativo e Exportação em PDF"
     ]
 )
 
@@ -34,6 +50,29 @@ def load_data():
 
 df = load_data()
 
+# ==============================
+# VARIÁVEIS PERSISTENTES
+# ==============================
+if "df_scaled" not in st.session_state:
+    st.session_state.df_scaled = None
+
+if "numeric_continuous" not in st.session_state:
+    st.session_state.numeric_continuous = None
+
+if "kmeans_model" not in st.session_state:
+    st.session_state.kmeans_model = None
+
+if "X" not in st.session_state:
+    st.session_state.X = None
+
+if "k_final" not in st.session_state:
+    st.session_state.k_final = None
+
+if "cols_nominal" not in st.session_state:
+    st.session_state.cols_nominal = None
+
+if "numeric_cols" not in st.session_state:
+    st.session_state.numeric_cols = None
 
 # ====================================================
 # OPÇÃO 1 – GERAR HISTOGRAMAS
@@ -129,6 +168,8 @@ elif menu == "Clusterização (K-Means)":
     st.subheader("🧩 Identificação de colunas numéricas e nominais")
 
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    st.session_state.numeric_cols = numeric_cols
+
     cols_nominal = [col for col in numeric_cols if df[col].nunique() <= 10]
 
     st.write("**Colunas detectadas como NOMINAL:**", cols_nominal)
@@ -190,8 +231,16 @@ elif menu == "Clusterização (K-Means)":
     st.subheader("🚀 Executando K-Means")
 
     if st.button("Rodar Clusterização"):
+        
         kmeans = KMeans(n_clusters=k_final, random_state=42)
         df_scaled["cluster"] = kmeans.fit_predict(X)
+
+        st.session_state.df_scaled = df_scaled
+        st.session_state.numeric_continuous = numeric_continuous
+        st.session_state.kmeans_model = kmeans
+        st.session_state.X = X
+        st.session_state.k_final = k_final
+        st.session_state.cols_nominal = cols_nominal
 
         st.success(f"Clusterização concluída com k = {k_final} clusters!")
         st.write(df_scaled.head())
@@ -199,7 +248,7 @@ elif menu == "Clusterização (K-Means)":
         # ============================================================
         # 6. Gerar ARFF (liac-arff)
         # ============================================================
-        from arff import dump as arff_dump
+
 
         arff_data = df_scaled.copy()
         for col in cols_nominal:
@@ -214,7 +263,11 @@ elif menu == "Clusterização (K-Means)":
             "data": arff_data.values.tolist()
         }
 
-        arff_file = arff_dump(arff_dict, return_string=True)
+        arff_buffer = StringIO()
+        arff_dump(arff_dict, arff_buffer)
+
+        # Conteúdo do arquivo como string
+        arff_file = arff_buffer.getvalue()
 
         st.download_button(
             "📥 Baixar ARFF Clusterizado",
@@ -241,19 +294,21 @@ elif menu == "Clusterização (K-Means)":
 
         st.success("Arquivos gerados com sucesso!")
 
-
-
-# ====================================================
-# OPÇÃO 3 – PLACEHOLDER
-# ====================================================
 elif menu == "Avaliação dos Clusters":
     st.header("📊 Avaliação dos Clusters (K-Means)")
 
-    # Verifica se a clusterização foi feita
-    if "cluster" not in df_scaled.columns:
-        st.error("⚠ A clusterização ainda não foi realizada.\n"
-                 "Vá para a *Opção 2 – Clusterização (K-Means)* e rode o modelo primeiro.")
+    if st.session_state.df_scaled is None:
+        st.error("⚠ Execute primeiro a opção 2 – Clusterização (K-Means).")
+        st.stop()
+
     else:
+        df_scaled = st.session_state.df_scaled
+        numeric_continuous = st.session_state.numeric_continuous
+        kmeans = st.session_state.kmeans_model
+        X = st.session_state.X
+        k_final = st.session_state.k_final
+        cols_nominal = st.session_state.cols_nominal
+
         st.success("Clusters carregados com sucesso! ✔")
 
         # ============================================================
@@ -362,10 +417,18 @@ elif menu == "Avaliação dos Clusters":
 elif menu == "Resumo Comparativo":
     st.header("📊 Resumo Comparativo Geral")
 
-    # Verificar se as etapas anteriores já foram realizadas
-    if "cluster" not in df_scaled.columns:
+    if st.session_state.df_scaled is None:
         st.error("⚠ É necessário executar antes as opções 1, 2 e 3!")
+        st.stop()
+
     else:
+        df_scaled = st.session_state.df_scaled
+        numeric_continuous = st.session_state.numeric_continuous
+        kmeans = st.session_state.kmeans_model
+        X = st.session_state.X
+        k_final = st.session_state.k_final
+        cols_nominal = st.session_state.cols_nominal
+        
         st.success("Resumo consolidado de todas as etapas.")
 
         # ---------------------------------------------
@@ -373,12 +436,12 @@ elif menu == "Resumo Comparativo":
         # ---------------------------------------------
         st.subheader("🟦 1. Estatísticas da Análise Exploratória (Opção 1)")
 
-        st.write("**Número de atributos numéricos:**", len(numeric_cols))
+        st.write("**Número de atributos numéricos:**", len(st.session_state.numeric_cols))
         st.write("**Colunas consideradas NOMINAL (≤ 10 valores únicos):**")
         st.write(cols_nominal)
 
         # Assimetria média dos atributos
-        skew_values = {col: df[col].skew() for col in numeric_cols}
+        skew_values = {col: df[col].skew() for col in st.session_state.numeric_cols}
         mean_skew = np.mean([abs(v) for v in skew_values.values()])
 
         st.write(f"**Assimetria média dos atributos:** `{mean_skew:.4f}`")
@@ -447,12 +510,21 @@ elif menu == "Resumo Comparativo":
         Você pode baixar os arquivos completos gerados na Opção 2 (ARFF e Excel).
         """)
 
-elif menu == "Resumo Comparativo":
+elif menu == "Resumo Comparativo e Exportação em PDF":
     st.header("📊 Resumo Comparativo Geral + Exportação em PDF")
 
-    if "cluster" not in df_scaled.columns:
-        st.error("⚠ Execute primeiro as opções 1, 2 e 3.")
+
+    if st.session_state.df_scaled is None:
+        st.error("⚠ É necessário executar antes as opções 1, 2 e 3!")
+        st.stop()
     else:
+        df_scaled = st.session_state.df_scaled
+        numeric_continuous = st.session_state.numeric_continuous
+        kmeans = st.session_state.kmeans_model
+        X = st.session_state.X
+        k_final = st.session_state.k_final
+        cols_nominal = st.session_state.cols_nominal
+
         st.success("Todas as etapas detectadas. Gerando resumo consolidado.")
 
         # ===========================
@@ -468,7 +540,6 @@ elif menu == "Resumo Comparativo":
         unique, counts = np.unique(labels, return_counts=True)
         cluster_sizes = dict(zip(unique, counts))
 
-        from sklearn.metrics import silhouette_samples
         sil_samples = silhouette_samples(X, labels)
 
         cluster_mean_sil = {
@@ -502,10 +573,6 @@ elif menu == "Resumo Comparativo":
         # ===========================
         # 3. Gerar figuras para o PDF
         # ===========================
-        import io
-        import matplotlib.pyplot as plt
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.pagesizes import A4
 
         # --- FIG 1: Silhouette Plot ---
         fig1, ax1 = plt.subplots(figsize=(8, 6))
