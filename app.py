@@ -513,7 +513,6 @@ elif menu == "Resumo Comparativo":
 elif menu == "Resumo Comparativo e Exportação em PDF":
     st.header("📊 Resumo Comparativo Geral + Exportação em PDF")
 
-
     if st.session_state.df_scaled is None:
         st.error("⚠ É necessário executar antes as opções 1, 2 e 3!")
         st.stop()
@@ -541,11 +540,7 @@ elif menu == "Resumo Comparativo e Exportação em PDF":
         cluster_sizes = dict(zip(unique, counts))
 
         sil_samples = silhouette_samples(X, labels)
-
-        cluster_mean_sil = {
-            c: np.mean(sil_samples[labels == c]) for c in unique
-        }
-
+        cluster_mean_sil = {c: np.mean(sil_samples[labels == c]) for c in unique}
         best_cluster = max(cluster_mean_sil, key=cluster_mean_sil.get)
         worst_cluster = min(cluster_mean_sil, key=cluster_mean_sil.get)
 
@@ -562,7 +557,6 @@ elif menu == "Resumo Comparativo e Exportação em PDF":
         # 2. Mostrar resumo na tela
         # ===========================
         st.subheader("🔹 Métricas Gerais")
-
         st.write(f"**Silhouette Score:** `{sil_score:.4f}`")
         st.write(f"**Davies-Bouldin Index:** `{db_score:.4f}`")
         st.write(f"**Calinski-Harabasz Index:** `{ch_score:.2f}`")
@@ -573,6 +567,10 @@ elif menu == "Resumo Comparativo e Exportação em PDF":
         # ===========================
         # 3. Gerar figuras para o PDF
         # ===========================
+        import io
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.utils import ImageReader
 
         # --- FIG 1: Silhouette Plot ---
         fig1, ax1 = plt.subplots(figsize=(8, 6))
@@ -613,7 +611,6 @@ elif menu == "Resumo Comparativo e Exportação em PDF":
         # ===========================
         pdf_buffer = io.BytesIO()
         c = canvas.Canvas(pdf_buffer, pagesize=A4)
-
         width, height = A4
         margin = 40
         y = height - margin
@@ -641,33 +638,27 @@ Pior cluster (silhouette médio): {worst_cluster}
             c.drawString(margin, y, line)
             y -= 18
 
-        # Inserir PNGs
+        # Função para adicionar imagens no PDF usando ImageReader
         def add_image(buf, y):
             img_height = 250
+            img = ImageReader(buf)
             if y < img_height + margin:
                 c.showPage()
-                return height - margin - img_height, True
-            c.drawImage(buf, margin, y, width=520, height=img_height)
-            return y - img_height - 40, False
+                y = height - margin - img_height
+            c.drawImage(img, margin, y, width=520, height=img_height)
+            return y - img_height - 40
 
-        y, newpage = add_image(buf1, y)
-        if newpage: c.showPage()
-
-        y, newpage = add_image(buf2, y)
-        if newpage: c.showPage()
-
-        y, newpage = add_image(buf3, y)
-        if newpage: c.showPage()
+        y = add_image(buf1, y)
+        y = add_image(buf2, y)
+        y = add_image(buf3, y)
 
         c.save()
-
         pdf_buffer.seek(0)
 
         # ===========================
         # 5. Botão de download PDF
         # ===========================
         st.subheader("📥 Download do PDF Consolidado")
-
         st.download_button(
             label="📄 Baixar Relatório PDF",
             data=pdf_buffer,
