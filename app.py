@@ -117,14 +117,495 @@ Interpretação:
 # ====================================================
 # OPÇÃO 2 – PLACEHOLDER
 # ====================================================
-elif menu == "Análise Estatística (placeholder)":
-    st.header("📘 Análise Estatística")
-    st.info("Esta opção será adicionada em breve.")
+elif menu == "Clusterização (K-Means)":
+    st.header("🤖 Clusterização com K-Means")
+
+    st.write("### 🔍 Carregando dataset…")
+    st.write(df.head())
+
+    # ============================================================
+    # 2. Identificar atributos numéricos e transformar códigos em NOMINAL
+    # ============================================================
+    st.subheader("🧩 Identificação de colunas numéricas e nominais")
+
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cols_nominal = [col for col in numeric_cols if df[col].nunique() <= 10]
+
+    st.write("**Colunas detectadas como NOMINAL:**", cols_nominal)
+
+    df_nominal = df.copy()
+    for col in cols_nominal:
+        df_nominal[col] = df_nominal[col].astype("category")
+
+    # ============================================================
+    # 3. Preparar dados numéricos para normalização
+    # ============================================================
+    st.subheader("⚙ Normalização MinMax dos atributos contínuos")
+
+    numeric_continuous = [c for c in numeric_cols if c not in cols_nominal]
+
+    scaler = MinMaxScaler()
+    df_scaled = df_nominal.copy()
+    df_scaled[numeric_continuous] = scaler.fit_transform(df_nominal[numeric_continuous])
+
+    st.write("**Colunas normalizadas:**", numeric_continuous)
+
+    # ============================================================
+    # 4. Gráfico do ELBOW
+    # ============================================================
+    st.subheader("📉 Método do Cotovelo (Elbow Method)")
+
+    X = df_scaled[numeric_continuous].dropna()
+
+    inertias = []
+    K_range = range(2, 16)
+
+    for k in K_range:
+        model = KMeans(n_clusters=k, random_state=42)
+        model.fit(X)
+        inertias.append(model.inertia_)
+
+    fig, ax = plt.subplots(figsize=(8,4))
+    ax.plot(K_range, inertias, marker='o')
+    ax.set_xlabel("Número de clusters (k)")
+    ax.set_ylabel("Inércia")
+    ax.set_title("Método do Cotovelo (Elbow Method)")
+    ax.grid()
+    st.pyplot(fig)
+
+    st.info("📌 Escolha o valor ideal de K com base no gráfico acima.")
+
+    # Campo para o usuário definir K
+    k_final = st.number_input(
+        "Escolha o número de clusters (k):",
+        min_value=2,
+        max_value=15,
+        value=12,
+        step=1
+    )
+
+    # ============================================================
+    # 5. Executar K-Means
+    # ============================================================
+    st.subheader("🚀 Executando K-Means")
+
+    if st.button("Rodar Clusterização"):
+        kmeans = KMeans(n_clusters=k_final, random_state=42)
+        df_scaled["cluster"] = kmeans.fit_predict(X)
+
+        st.success(f"Clusterização concluída com k = {k_final} clusters!")
+        st.write(df_scaled.head())
+
+        # ============================================================
+        # 6. Gerar ARFF (liac-arff)
+        # ============================================================
+        from arff import dump as arff_dump
+
+        arff_data = df_scaled.copy()
+        for col in cols_nominal:
+            arff_data[col] = arff_data[col].astype(str)
+
+        arff_dict = {
+            "relation": "dataset_clusters",
+            "attributes": [
+                (col, "STRING") if col in cols_nominal else (col, "NUMERIC")
+                for col in arff_data.columns
+            ],
+            "data": arff_data.values.tolist()
+        }
+
+        arff_file = arff_dump(arff_dict, return_string=True)
+
+        st.download_button(
+            "📥 Baixar ARFF Clusterizado",
+            arff_file,
+            file_name="dataset_clusterizado.arff",
+            mime="text/plain"
+        )
+
+        # ============================================================
+        # 7. Salvar Excel com clusters
+        # ============================================================
+        df_final_excel = df.copy()
+        df_final_excel["cluster"] = df_scaled["cluster"]
+
+        excel_buffer = StringIO()
+        df_final_excel.to_csv(excel_buffer, index=False)
+
+        st.download_button(
+            "📥 Baixar dataset final com clusters (CSV)",
+            excel_buffer.getvalue(),
+            file_name="dataset_com_clusters.csv",
+            mime="text/csv"
+        )
+
+        st.success("Arquivos gerados com sucesso!")
+
 
 
 # ====================================================
 # OPÇÃO 3 – PLACEHOLDER
 # ====================================================
-elif menu == "Modelos (placeholder)":
-    st.header("🤖 Modelos de Machine Learning")
-    st.info("Esta opção será implementada posteriormente.")
+elif menu == "Avaliação dos Clusters":
+    st.header("📊 Avaliação dos Clusters (K-Means)")
+
+    # Verifica se a clusterização foi feita
+    if "cluster" not in df_scaled.columns:
+        st.error("⚠ A clusterização ainda não foi realizada.\n"
+                 "Vá para a *Opção 2 – Clusterização (K-Means)* e rode o modelo primeiro.")
+    else:
+        st.success("Clusters carregados com sucesso! ✔")
+
+        # ============================================================
+        # 1. Preparar dados
+        # ============================================================
+        X = df_scaled[numeric_continuous].dropna()
+        labels = df_scaled["cluster"].values
+
+        st.subheader("📈 Métricas de Avaliação")
+
+        # ============================================================
+        # 2. MÉTRICAS
+        # ============================================================
+        sil_score = silhouette_score(X, labels)
+        db_score = davies_bouldin_score(X, labels)
+        ch_score = calinski_harabasz_score(X, labels)
+
+        st.write(f"**Silhouette Score:** `{sil_score:.4f}`")
+        st.write(f"**Davies-Bouldin Index (menor melhor):** `{db_score:.4f}`")
+        st.write(f"**Calinski-Harabasz (maior melhor):** `{ch_score:.2f}`")
+
+        # Tamanho dos clusters
+        unique, counts = np.unique(labels, return_counts=True)
+        cluster_sizes = dict(zip(unique, counts))
+
+        st.write("### 🔢 Tamanho dos clusters")
+        st.write(cluster_sizes)
+
+        # ============================================================
+        # 3. CENTROIDES
+        # ============================================================
+        st.subheader("🧭 Centroides dos Clusters")
+        centroids = pd.DataFrame(kmeans.cluster_centers_, columns=numeric_continuous)
+        st.dataframe(centroids.round(4))
+
+        # ============================================================
+        # 4. SILHOUETTE PLOT
+        # ============================================================
+        st.subheader("📉 Silhouette Plot por Cluster")
+
+        sample_silhouette_values = silhouette_samples(X, labels)
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        y_lower = 10
+
+        for i in unique:
+            ith = sample_silhouette_values[labels == i]
+            ith.sort()
+
+            size_cluster_i = ith.shape[0]
+            y_upper = y_lower + size_cluster_i
+
+            ax.fill_betweenx(
+                np.arange(y_lower, y_upper),
+                0, ith,
+                alpha=0.7
+            )
+            ax.text(-0.05, (y_lower + y_upper) / 2, str(i))
+            y_lower = y_upper + 10
+
+        ax.axvline(x=sil_score, color="red", linestyle="--")
+        ax.set_title("Silhouette Plot")
+        ax.set_xlabel("Coeficiente de Silhouette")
+        ax.set_ylabel("Amostras")
+
+        st.pyplot(fig)
+
+        # ============================================================
+        # 5. PCA 2D
+        # ============================================================
+        st.subheader("🧭 Visualização PCA 2D dos Clusters")
+
+        pca = PCA(n_components=2)
+        pca_result = pca.fit_transform(X)
+
+        df_pca = pd.DataFrame({
+            "PC1": pca_result[:, 0],
+            "PC2": pca_result[:, 1],
+            "cluster": labels
+        })
+
+        fig2, ax2 = plt.subplots(figsize=(8, 6))
+        sns.scatterplot(
+            data=df_pca,
+            x="PC1",
+            y="PC2",
+            hue="cluster",
+            palette="tab10",
+            ax=ax2
+        )
+        ax2.set_title("Clusters via PCA 2D")
+        st.pyplot(fig2)
+
+        # ============================================================
+        # 6. HEATMAP
+        # ============================================================
+        st.subheader("🔥 Heatmap das Médias por Cluster")
+
+        cluster_means = df_scaled.groupby("cluster")[numeric_continuous].mean()
+
+        fig3, ax3 = plt.subplots(figsize=(12, 6))
+        sns.heatmap(cluster_means, annot=True, fmt=".2f", cmap="viridis", ax=ax3)
+        ax3.set_title("Médias dos atributos por cluster")
+        st.pyplot(fig3)
+
+elif menu == "Resumo Comparativo":
+    st.header("📊 Resumo Comparativo Geral")
+
+    # Verificar se as etapas anteriores já foram realizadas
+    if "cluster" not in df_scaled.columns:
+        st.error("⚠ É necessário executar antes as opções 1, 2 e 3!")
+    else:
+        st.success("Resumo consolidado de todas as etapas.")
+
+        # ---------------------------------------------
+        # SEÇÃO 1 — RESUMO DA OPÇÃO 1
+        # ---------------------------------------------
+        st.subheader("🟦 1. Estatísticas da Análise Exploratória (Opção 1)")
+
+        st.write("**Número de atributos numéricos:**", len(numeric_cols))
+        st.write("**Colunas consideradas NOMINAL (≤ 10 valores únicos):**")
+        st.write(cols_nominal)
+
+        # Assimetria média dos atributos
+        skew_values = {col: df[col].skew() for col in numeric_cols}
+        mean_skew = np.mean([abs(v) for v in skew_values.values()])
+
+        st.write(f"**Assimetria média dos atributos:** `{mean_skew:.4f}`")
+
+
+        # ---------------------------------------------
+        # SEÇÃO 2 — RESUMO DA OPÇÃO 2
+        # ---------------------------------------------
+        st.subheader("🟩 2. Resultados da Clusterização (Opção 2)")
+
+        st.write(f"**Número de clusters escolhidos (k):** `{k_final}`")
+
+        # Tamanho dos clusters
+        unique, counts = np.unique(df_scaled["cluster"].values, return_counts=True)
+        cluster_sizes = dict(zip(unique, counts))
+
+        st.write("**Tamanho dos clusters:**")
+        st.write(cluster_sizes)
+
+        # Número de atributos normalizados
+        st.write("**Atributos normalizados:**")
+        st.write(numeric_continuous)
+
+
+        # ---------------------------------------------
+        # SEÇÃO 3 — RESUMO DA AVALIAÇÃO (Opção 3)
+        # ---------------------------------------------
+        st.subheader("🟧 3. Avaliação dos Clusters (Opção 3)")
+
+        sil_score = silhouette_score(X, df_scaled["cluster"].values)
+        db_score = davies_bouldin_score(X, df_scaled["cluster"].values)
+        ch_score = calinski_harabasz_score(X, df_scaled["cluster"].values)
+
+        st.write(f"**Silhouette Score:** `{sil_score:.4f}`")
+        st.write(f"**Davies-Bouldin:** `{db_score:.4f}`  (menor melhor)")
+        st.write(f"**Calinski–Harabasz:** `{ch_score:.2f}` (maior melhor)")
+
+        # Melhor e pior cluster (por média de silhouette)
+        from sklearn.metrics import silhouette_samples
+        sil_samples = silhouette_samples(X, df_scaled["cluster"].values)
+
+        cluster_mean_sil = {
+            c: np.mean(sil_samples[df_scaled["cluster"] == c])
+            for c in unique
+        }
+
+        best_cluster = max(cluster_mean_sil, key=cluster_mean_sil.get)
+        worst_cluster = min(cluster_mean_sil, key=cluster_mean_sil.get)
+
+        st.write(f"**Melhor cluster (silhouette médio):** `{best_cluster}`")
+        st.write(f"**Pior cluster (silhouette médio):** `{worst_cluster}`")
+
+        # ---------------------------------------------
+        # SEÇÃO 4 — VISÃO FINAL
+        # ---------------------------------------------
+        st.subheader("🏁 Conclusão Geral")
+
+        st.markdown("""
+        ### 🔍 Insights Gerais:
+        - A opção 1 confirmou quais atributos são realmente relevantes.
+        - A opção 2 mostrou como os dados se agrupam sob normalização.
+        - A opção 3 avaliou matematicamente a qualidade dos clusters.
+        - A partir disso, você pode identificar padrões importantes, clusters dominantes e atributos críticos.
+
+        ### 📤 Exportações:
+        Você pode baixar os arquivos completos gerados na Opção 2 (ARFF e Excel).
+        """)
+
+elif menu == "Resumo Comparativo":
+    st.header("📊 Resumo Comparativo Geral + Exportação em PDF")
+
+    if "cluster" not in df_scaled.columns:
+        st.error("⚠ Execute primeiro as opções 1, 2 e 3.")
+    else:
+        st.success("Todas as etapas detectadas. Gerando resumo consolidado.")
+
+        # ===========================
+        # 1. Recalcular métricas
+        # ===========================
+        X = df_scaled[numeric_continuous].dropna()
+        labels = df_scaled["cluster"].values
+
+        sil_score = silhouette_score(X, labels)
+        db_score = davies_bouldin_score(X, labels)
+        ch_score = calinski_harabasz_score(X, labels)
+
+        unique, counts = np.unique(labels, return_counts=True)
+        cluster_sizes = dict(zip(unique, counts))
+
+        from sklearn.metrics import silhouette_samples
+        sil_samples = silhouette_samples(X, labels)
+
+        cluster_mean_sil = {
+            c: np.mean(sil_samples[labels == c]) for c in unique
+        }
+
+        best_cluster = max(cluster_mean_sil, key=cluster_mean_sil.get)
+        worst_cluster = min(cluster_mean_sil, key=cluster_mean_sil.get)
+
+        # PCA para plot
+        pca = PCA(n_components=2)
+        pca_result = pca.fit_transform(X)
+        df_pca = pd.DataFrame({
+            "PC1": pca_result[:, 0],
+            "PC2": pca_result[:, 1],
+            "cluster": labels
+        })
+
+        # ===========================
+        # 2. Mostrar resumo na tela
+        # ===========================
+        st.subheader("🔹 Métricas Gerais")
+
+        st.write(f"**Silhouette Score:** `{sil_score:.4f}`")
+        st.write(f"**Davies-Bouldin Index:** `{db_score:.4f}`")
+        st.write(f"**Calinski-Harabasz Index:** `{ch_score:.2f}`")
+        st.write("**Tamanho dos clusters:**", cluster_sizes)
+        st.write(f"**Melhor cluster:** {best_cluster}")
+        st.write(f"**Pior cluster:** {worst_cluster}")
+
+        # ===========================
+        # 3. Gerar figuras para o PDF
+        # ===========================
+        import io
+        import matplotlib.pyplot as plt
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import A4
+
+        # --- FIG 1: Silhouette Plot ---
+        fig1, ax1 = plt.subplots(figsize=(8, 6))
+        y_lower = 10
+        for i in unique:
+            ith = sil_samples[labels == i]
+            ith.sort()
+            size_i = ith.shape[0]
+            y_upper = y_lower + size_i
+            ax1.fill_betweenx(np.arange(y_lower, y_upper), 0, ith, alpha=0.7)
+            ax1.text(-0.05, (y_lower + y_upper) / 2, str(i))
+            y_lower = y_upper + 10
+        ax1.axvline(x=sil_score, color="red", linestyle="--")
+        ax1.set_title("Silhouette Plot")
+        buf1 = io.BytesIO()
+        fig1.savefig(buf1, format="png")
+        buf1.seek(0)
+
+        # --- FIG 2: PCA ---
+        fig2, ax2 = plt.subplots(figsize=(8, 6))
+        sns.scatterplot(data=df_pca, x="PC1", y="PC2", hue="cluster", palette="tab10", ax=ax2)
+        ax2.set_title("Visualização PCA 2D")
+        buf2 = io.BytesIO()
+        fig2.savefig(buf2, format="png")
+        buf2.seek(0)
+
+        # --- FIG 3: Heatmap ---
+        cluster_means = df_scaled.groupby("cluster")[numeric_continuous].mean()
+        fig3, ax3 = plt.subplots(figsize=(10, 5))
+        sns.heatmap(cluster_means, annot=True, fmt=".2f", cmap="viridis", ax=ax3)
+        ax3.set_title("Heatmap das Médias dos Clusters")
+        buf3 = io.BytesIO()
+        fig3.savefig(buf3, format="png")
+        buf3.seek(0)
+
+        # ===========================
+        # 4. Criar PDF em memória
+        # ===========================
+        pdf_buffer = io.BytesIO()
+        c = canvas.Canvas(pdf_buffer, pagesize=A4)
+
+        width, height = A4
+        margin = 40
+        y = height - margin
+
+        # TÍTULO
+        c.setFont("Helvetica-Bold", 18)
+        c.drawString(margin, y, "Resumo Comparativo do Projeto")
+        y -= 40
+
+        # TEXTO PRINCIPAL
+        c.setFont("Helvetica", 12)
+        text = f"""
+Métricas Gerais:
+----------------------------
+Silhouette Score: {sil_score:.4f}
+Davies-Bouldin Index: {db_score:.4f}
+Calinski-Harabasz: {ch_score:.2f}
+
+Tamanho dos Clusters: {cluster_sizes}
+
+Melhor cluster (silhouette médio): {best_cluster}
+Pior cluster (silhouette médio): {worst_cluster}
+        """
+        for line in text.split("\n"):
+            c.drawString(margin, y, line)
+            y -= 18
+
+        # Inserir PNGs
+        def add_image(buf, y):
+            img_height = 250
+            if y < img_height + margin:
+                c.showPage()
+                return height - margin - img_height, True
+            c.drawImage(buf, margin, y, width=520, height=img_height)
+            return y - img_height - 40, False
+
+        y, newpage = add_image(buf1, y)
+        if newpage: c.showPage()
+
+        y, newpage = add_image(buf2, y)
+        if newpage: c.showPage()
+
+        y, newpage = add_image(buf3, y)
+        if newpage: c.showPage()
+
+        c.save()
+
+        pdf_buffer.seek(0)
+
+        # ===========================
+        # 5. Botão de download PDF
+        # ===========================
+        st.subheader("📥 Download do PDF Consolidado")
+
+        st.download_button(
+            label="📄 Baixar Relatório PDF",
+            data=pdf_buffer,
+            file_name="relatorio_comparativo.pdf",
+            mime="application/pdf"
+        )
+
+        st.success("PDF gerado com sucesso!")

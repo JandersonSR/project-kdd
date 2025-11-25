@@ -1,8 +1,9 @@
 streamlit
-
-matplotlib
-numpy
-
 pandas
+numpy
+matplotlib
 seaborn
-# textwrap
+scikit-learn
+liac-arff
+reportlab
+openpyxl
